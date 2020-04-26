@@ -85,8 +85,9 @@ mba<-merge(mba0,Customerinfo,by="CustomerID",y.all=TRUE)
 
 
 mba<-mba%>% 
-		filter(#Tiername=='ALPHA' | Tiername=='PLATINUM' | Tiername=='SUPREME'| 
-			Tiername=='SUPREME 88')
+		filter(#Tiername=='Insider' | Tiername=='Vip' | Tiername=='Elite'| 
+			Tiername=='Vip')
+
 
 
 names(mba)

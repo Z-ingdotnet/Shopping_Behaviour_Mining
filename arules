@@ -1,0 +1,460 @@
+######################################################################################
+######################################################################################
+###                                                                                ###
+###                                     TITLE:                                     ###
+###                                     R CODE                                     ###
+###                        AUTHOR: 政 ZHUZHENG(IVERSON) ZHOU                       ###
+###                                DATE: 2016-06-01                                 ###
+###                                    VERSION 1                                   ###
+###  			TOPIC: Shopping Behaviour using Apriori Rule Minging			               ###
+###                                                                                ###
+######################################################################################
+######################################################################################
+
+
+.libPaths()
+.libPaths("C:/Program Files/R/R-3.6.1/library")
+
+
+library(RODBC)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(ggvis)
+library(sqldf)
+library(tidyr)
+library(fastR)
+library(arules)
+library(arulesViz)
+
+library(plyr)
+
+rm(df.ar,Rules)
+
+
+mba0 <- sqlQuery(dbhandle,"
+ select CustomerID
+                ,Date 
+                ,freesTranID
+                ,sum(Adj_freesItemCount) redeem_item_count
+                ,count(freesTranID) as redeem_count
+                ,sum(freesdollarvalue) as redeemed_frees_dollarvalue
+                ,sum(freesAmount) as redeemed_freesAmount
+                ,sum(freesAmount)*10 as pointsused
+
+                ,item.freesItemSubTypeDesci--freesItemDesci
+                ,item.freesItemDesci
+                from DBMan..freesTran a
+                left join DBMan..au_promotion d on a.promotionid=d.promotionid
+                left join DBMan..au_freesType (nolock) b on a.freesTypeId=b.freesTypeId
+                left join DBMan..au_freesTranType (nolock) c on a.freesTranTypeId=c.freesTranTypeId
+                left join DBMan..au_freesStatus (nolock) dcs  on a.freesStatus_key = dcs.freesStatus_key
+                left join DBMan..au_freesItem (nolock) item on a.freesitemid=item.freesitemid
+                
+                where 
+                (
+                a.freesTypeId=5
+                and  a.TypeId=2
+                )
+				and date>='2019-01-01'
+                group by CustomerID
+                ,date 
+                ,freesItemSubTypeDesci
+                ,freesItemDesci,freesTranID
+  "
+)
+
+
+
+Customerinfo <- sqlQuery(dbhandle,"
+                                select 
+                                  a.CustomerID
+                                  ,a.Gender
+                                  ,a.Age
+                                  ,a.CustomerLanguage
+                                  ,b.Tiername
+                                from (select * from DBMan..Customerinfo where ISNULL(realCustomerflag,1) = 1 and status in ('Active','Churned') )  a
+                                left join DBMan..CustomerInfo_latest b on a.CustomerID=b.CustomerID 
+                                "
+                        )
+
+
+names(mba0)[1]<-'CustomerID'
+mba<-merge(mba0,Customerinfo,by="CustomerID",y.all=TRUE)
+
+
+
+mba<-mba%>% 
+		filter(#Tiername=='ALPHA' | Tiername=='PLATINUM' | Tiername=='SUPREME'| 
+			Tiername=='SUPREME 88')
+
+
+names(mba)
+str(mba)
+class(mba)
+dim(mba)
+
+
+
+
+mba2 <- as(split(as.vector(mba$freesItemSubTypeDesci)#, as.vector(mba$freesTranID)  
+																					#,as.vector(mba$CustomerID) 
+																					,as.Date(mba$date)
+																						) #, as.vector(mba$Gender)
+           ,"transactions")
+
+summary(mba2)
+
+
+
+
+rules_1 <- apriori(mba2,parameter = list(sup = 0.5, conf = 0.7, 
+                                         #maxlen=5,
+                                        minlen=2,
+                                         target="rules")) #sup = 0.001, conf = 0.01, target="rules"
+
+  inspect(head(sort(rules_1, by = "confidence"), 10))
+
+
+
+
+
+
+x<-Customerinfo %>%
+  mutate(Tiername = forcats::fct_explicit_na(Tiername)) %>%
+  group_by(Tiername)  %>%
+  tally()
+
+
+
+
+
+inspect(head(sort(rules_2, by = "confidence"), 10))
+
+
+rules_sorted <- sort(rules_2, by ="lift")
+
+inspect(rules_sorted)
+inspect(rules_sorted[1:50])
+
+
+###############################Large vs Small Baskets###############################
+largeTransactions <- rules_sorted[size(items(rules_sorted)) > 4]
+summary(largeTransactions)
+inspect(largeTransactions)
+
+smallTransactions <- rules_sorted[size(items(rules_sorted)) < 3]
+summary(smallTransactions)
+inspect(smallTransactions)
+###############################Large vs Small Baskets###############################
+
+
+
+
+###############################Apple Product###############################
+
+mba3 <- as(split(as.vector(mba$freesItemSubTypeDesci)#, as.vector(mba$freesTranID)  
+                 #,as.vector(mba$CustomerID) 
+                 ,as.Date(mba$date)
+) #, as.vector(mba$Gender)
+,"transactions")
+itemLabels(mba3)
+
+
+
+AppleProduct.association.rules <- apriori(mba3, parameter = list(supp=0.5, conf=0.7, minlen=2),appearance = list(default="Apple Product" ,default='rhs'))
+
+AppleProduct.association.rules_sorted <- sort(AppleProduct.association.rules, by ="lift")
+
+AppleProduct.association.rules_no_redundant<- AppleProduct.association.rules_sorted[!is.redundant(AppleProduct.association.rules_sorted,measure = "lift")]
+
+AppleProduct.association.rules_no_redundant_dup<-AppleProduct.association.rules_no_redundant[!duplicated(generatingItemsets(AppleProduct.association.rules_no_redundant))]
+
+
+subrules2 <- head(sort(AppleProduct.association.rules_no_redundant_dup, by="confidence"), 20)
+plot(subrules2, method="graph")
+###############################Apple Product###############################
+
+
+
+
+###############################subtype_date###############################
+
+mba<-mba%>% 
+		filter(#Tiername=='Insider' | Tiername=='Vip' | Tiername=='Elite'| 
+			Tiername=='Vip')
+
+
+
+mba2 <- as(split(as.vector(mba$freesItemSubTypeDesci)#, as.vector(mba$freesTranID)  
+																					#,as.vector(mba$CustomerID) 
+																					,as.Date(mba$date)
+																						) #, as.vector(mba$Gender)
+           ,"transactions")
+
+summary(mba2)
+
+
+
+
+rules_subtype_date <- apriori(mba2,parameter = list(sup = 0.5, conf = 0.7, 
+                                         #maxlen=5,
+                                        minlen=2,
+                                         target="rules")) #sup = 0.001, conf = 0.01, target="rules"
+
+inspect(head(sort(rules_subtype_date, by = "confidence"), 10))
+
+
+rules_2_sorted <- sort(rules_subtype_date, by ="lift")
+
+
+rules_2_no_redundant<- rules_2_sorted[!is.redundant(rules_2_sorted,measure = "lift")]
+
+rules_2_no_redundant_dup<-rules_2_no_redundant[!duplicated(generatingItemsets(rules_2_no_redundant))]
+
+
+subrules2_conf <- head(sort(rules_2_no_redundant_dup, by="confidence"), 20)
+plot(subrules2_conf, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="support"), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="Lift"), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+###############################subtype_date###############################
+
+
+
+###############################subtype_CustomerID###############################
+
+mba<-mba%>% 
+		filter(#Tiername=='Insider' | Tiername=='Vip' | Tiername=='Elite'| 
+			Tiername=='Vip')
+
+
+
+mba2 <- as(split(as.vector(mba$freesItemSubTypeDesci)#, as.vector(mba$freesTranID)  
+																					,as.vector(mba$CustomerID) 
+																					#,as.Date(mba$date)
+																						) #, as.vector(mba$Gender)
+           ,"transactions")
+
+summary(mba2)
+
+
+
+
+rules_subtype_date <- apriori(mba2,parameter = list(sup = 0.05, conf = 0.5, 
+                                         #maxlen=5,
+                                        minlen=2,
+                                         target="rules")) #sup = 0.001, conf = 0.01, target="rules"
+
+inspect(head(sort(rules_subtype_date, by = "confidence"), 10))
+
+
+
+`%notin%` <- Negate(`%in%`)
+  rules_subtype_date <- subset(rules_subtype_date, subset = (rhs %notin% grep('Food & Beverage',levels(mba$freesItemSubTypeDesci),value=TRUE)                                      
+                                      	#& (lhs %notin% grep('WK Credit|Wkdy|Wknd|WD Credit|Night',levels(mba$freesItemSubTypeDesci),value=TRUE))
+                                      #& lift > 1.2
+                                      )                 
+                                      & confidence >= 0.5
+                  )
+
+
+rules_2_sorted <- sort(rules_subtype_date, by ="lift")
+
+
+rules_2_no_redundant<- rules_2_sorted[!is.redundant(rules_2_sorted,measure = "lift")]
+
+rules_2_no_redundant_dup<-rules_2_no_redundant[!duplicated(generatingItemsets(rules_2_no_redundant))]
+
+
+subrules2_conf <- head(sort(rules_2_no_redundant_dup, by="confidence"), 20)
+plot(subrules2_conf, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="support"), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="Lift"), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+###############################subtype_CustomerID###############################
+
+
+
+
+
+###############################item_CustomerID###############################
+mba<-mba%>% 
+		filter(#Tiername=='Insider' | Tiername=='Vip' | Tiername=='Elite'| 
+			Tiername=='Vip')
+
+
+
+mba2 <- as(split(as.vector(mba$freesItemDesci)#, as.vector(mba$freesTranID)  
+																					,as.vector(mba$CustomerID) 
+																					#,as.Date(mba$date)
+																						) #, as.vector(mba$Gender)
+           ,"transactions")
+
+summary(mba2)
+
+
+
+
+rules_Item_date <- apriori(mba2,parameter = list(sup = 0.1, conf = 0.5, 
+                                         #maxlen=5,
+                                        minlen=2,
+                                         target="rules")) #sup = 0.001, conf = 0.01, target="rules"
+
+inspect(head(sort(rules_Item_date, by = "confidence"), 10))
+
+
+
+
+rules_2_sorted <- sort(rules_Item_date, by ="lift")
+
+rules_2_no_redundant<- rules_2_sorted[!is.redundant(rules_2_sorted,measure = "lift")]
+
+rules_2_no_redundant_dup<-rules_2_no_redundant[!duplicated(generatingItemsets(rules_2_no_redundant))]
+
+#subrules2_conf <- head(sort(rules_2_no_redundant_dup, by="confidence"), 20)
+#plot(subrules2_conf, method="graph",  engine = "htmlwidget")
+#subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="support"), 20)
+#plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by=c("lift","support")), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+
+
+plot(rules_2_no_redundant_dup,
+
+method = "paracoord",
+
+control = list(reorder = TRUE))
+
+
+###############################item_CustomerID###############################
+
+
+
+
+
+
+
+
+
+###############################item_date###############################
+
+mba<-mba%>% 
+		filter(#Tiername=='Insider' | Tiername=='Vip' | Tiername=='Elite'| 
+			Tiername=='Vip')
+
+
+
+mba2 <- as(split(as.vector(mba$freesItemDesci)#, as.vector(mba$freesTranID)  
+																					#,as.vector(mba$CustomerID) 
+																					,as.Date(mba$date)
+																						) #, as.vector(mba$Gender)
+           ,"transactions")
+
+summary(mba2)
+
+
+
+
+rules_Item_date <- apriori(mba2,parameter = list(sup = 0.1, conf = 0.5, 
+                                         #maxlen=5,
+                                        minlen=2,
+                                         target="rules")) #sup = 0.001, conf = 0.01, target="rules"
+
+inspect(head(sort(rules_Item_date, by = "confidence"), 10))
+
+
+
+rules_2_sorted <- sort(rules_Item_date, by ="lift")
+
+rules_2_no_redundant<- rules_2_sorted[!is.redundant(rules_2_sorted,measure = "lift")]
+
+rules_2_no_redundant_dup<-rules_2_no_redundant[!duplicated(generatingItemsets(rules_2_no_redundant))]
+
+#subrules2_conf <- head(sort(rules_2_no_redundant_dup, by="confidence"), 20)
+#plot(subrules2_conf, method="graph",  engine = "htmlwidget")
+#subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="support"), 20)
+#plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by=c("lift","support")), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+
+
+plot(rules_2_no_redundant_dup,
+
+method = "paracoord",
+
+control = list(reorder = TRUE))
+
+
+###############################item_date###############################
+
+
+
+
+
+
+
+
+###############################item_date_SUPREME###############################
+
+mba<-mba%>% 
+		filter(#Tiername=='Insider' | Tiername=='Vip' | Tiername=='Elite'| 
+			Tiername=='Vip')
+
+
+
+mba2 <- as(split(as.vector(mba$freesItemDesci)#, as.vector(mba$freesTranID)  
+																					#,as.vector(mba$CustomerID) 
+																					,as.Date(mba$date)
+																						) #, as.vector(mba$Gender)
+           ,"transactions")
+
+summary(mba2)
+
+
+
+
+rules_Item_date <- apriori(mba2,parameter = list(sup = 0.1, conf = 0.5, 
+                                         #maxlen=5,
+                                        minlen=2,
+                                         target="rules")) #sup = 0.001, conf = 0.01, target="rules"
+
+inspect(head(sort(rules_Item_date, by = "confidence"), 10))
+
+
+rules_2_sorted <- sort(rules_Item_date, by ="lift")
+
+rules_2_no_redundant<- rules_2_sorted[!is.redundant(rules_2_sorted,measure = "lift")]
+
+rules_2_no_redundant_dup<-rules_2_no_redundant[!duplicated(generatingItemsets(rules_2_no_redundant))]
+
+#subrules2_conf <- head(sort(rules_2_no_redundant_dup, by="confidence"), 20)
+#plot(subrules2_conf, method="graph",  engine = "htmlwidget")
+#subrules2_sup <- head(sort(rules_2_no_redundant_dup, by="support"), 20)
+#plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+subrules2_sup <- head(sort(rules_2_no_redundant_dup, by=c("lift","support")), 20)
+plot(subrules2_sup, method="graph",  engine = "htmlwidget")
+
+
+
+plot(rules_2_no_redundant_dup,
+
+method = "paracoord",
+
+control = list(reorder = TRUE))
+
+
+###############################item_date_SUPREME###############################
